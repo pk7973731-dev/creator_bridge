@@ -1,0 +1,479 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Pillar 3: Reusable Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'pk7973731@gmail.com'
+      );
+    }
+
+    // --- Pillar 2: Validation Blueprints (No existing() or diff() inside helpers) ---
+    function isValidUserAccount(data, uidParam) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'role', 'dealerProfileId', 'creatorProfileId', 'createdAt', 'updatedAt'])
+        && data.uid is string && isValidId(data.uid) && data.uid == uidParam
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.photoURL is string && data.photoURL.size() <= 500
+        && data.role in ['business', 'creator']
+        && (!('dealerProfileId' in data) || (data.dealerProfileId is string && isValidId(data.dealerProfileId)))
+        && (!('creatorProfileId' in data) || (data.creatorProfileId is string && isValidId(data.creatorProfileId)))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDealer(data, docId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'companyName', 'industry', 'website', 'tagline',
+          'description', 'avatar', 'defaultBudget', 'targetAgeRange',
+          'primaryRegion', 'brandValues', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'companyName', 'industry', 'website', 'tagline',
+          'description', 'avatar', 'defaultBudget', 'targetAgeRange',
+          'primaryRegion', 'brandValues', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && isValidId(data.id) && data.id == docId
+        && data.ownerUid is string && isValidId(data.ownerUid)
+        && data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 120
+        && data.industry is string && data.industry.size() >= 1 && data.industry.size() <= 100
+        && data.website is string && data.website.size() <= 300
+        && data.tagline is string && data.tagline.size() <= 200
+        && data.description is string && data.description.size() <= 1000
+        && data.avatar is string && data.avatar.size() <= 500
+        && data.defaultBudget is number && data.defaultBudget >= 0 && data.defaultBudget <= 100000000
+        && data.targetAgeRange is string && data.targetAgeRange.size() >= 1 && data.targetAgeRange.size() <= 40
+        && data.primaryRegion is string && data.primaryRegion.size() >= 1 && data.primaryRegion.size() <= 80
+        && data.brandValues is list && data.brandValues.size() <= 10
+        && (data.brandValues.size() == 0 || (data.brandValues[0] is string && data.brandValues[0].size() <= 60))
+        && data.isPublic is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCreator(data, docId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'handle', 'channelUrl', 'platform', 'niche',
+          'subNiches', 'bio', 'avatar', 'subscribers', 'avgViews', 'engagementRate',
+          'rateDedicated', 'rateIntegrated', 'rateShorts', 'credibilityScore',
+          'riskLevel', 'fakeFollowersEstimatePct', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'handle', 'channelUrl', 'platform', 'niche',
+          'subNiches', 'bio', 'avatar', 'subscribers', 'avgViews', 'engagementRate',
+          'rateDedicated', 'rateIntegrated', 'rateShorts', 'credibilityScore',
+          'riskLevel', 'fakeFollowersEstimatePct', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && isValidId(data.id) && data.id == docId
+        && data.ownerUid is string && isValidId(data.ownerUid)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.handle is string && data.handle.size() >= 1 && data.handle.size() <= 80
+        && data.channelUrl is string && data.channelUrl.size() <= 300
+        && data.platform in ['YouTube', 'Instagram', 'TikTok']
+        && data.niche in [
+          'Tech & Gadgets', 'Beauty & Skincare', 'Fitness & Health',
+          'Finance & Crypto', 'Gaming & Hardware', 'Food & Cooking', 'Travel & Lifestyle'
+        ]
+        && data.subNiches is list && data.subNiches.size() <= 10
+        && (data.subNiches.size() == 0 || (data.subNiches[0] is string && data.subNiches[0].size() <= 60))
+        && data.bio is string && data.bio.size() <= 1000
+        && data.avatar is string && data.avatar.size() <= 500
+        && data.subscribers is number && data.subscribers >= 0
+        && data.avgViews is number && data.avgViews >= 0
+        && data.engagementRate is number && data.engagementRate >= 0 && data.engagementRate <= 100
+        && data.rateDedicated is number && data.rateDedicated >= 0
+        && data.rateIntegrated is number && data.rateIntegrated >= 0
+        && data.rateShorts is number && data.rateShorts >= 0
+        && data.credibilityScore is number && data.credibilityScore >= 0 && data.credibilityScore <= 100
+        && data.riskLevel in ['VERIFIED_SAFE', 'MODERATE_CAUTION', 'HIGH_RISK_SUSPICIOUS']
+        && data.fakeFollowersEstimatePct is number && data.fakeFollowersEstimatePct >= 0 && data.fakeFollowersEstimatePct <= 100
+        && data.isPublic is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCampaign(data, docId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'dealerId', 'dealerName', 'productName', 'productTagline',
+          'productCategory', 'description', 'targetAudience', 'budget', 'deliverableNeeded',
+          'status', 'deadline', 'keyTalkingPoints', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'dealerId', 'dealerName', 'productName', 'productTagline',
+          'productCategory', 'description', 'targetAudience', 'budget', 'deliverableNeeded',
+          'status', 'deadline', 'keyTalkingPoints', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && isValidId(data.id) && data.id == docId
+        && data.ownerUid is string && isValidId(data.ownerUid)
+        && data.dealerId is string && isValidId(data.dealerId)
+        && data.dealerName is string && data.dealerName.size() >= 1 && data.dealerName.size() <= 120
+        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 160
+        && data.productTagline is string && data.productTagline.size() <= 200
+        && data.productCategory is string && data.productCategory.size() >= 1 && data.productCategory.size() <= 80
+        && data.description is string && data.description.size() <= 1000
+        && data.targetAudience is string && data.targetAudience.size() <= 200
+        && data.budget is number && data.budget >= 0 && data.budget <= 100000000
+        && data.deliverableNeeded in ['Dedicated YouTube Video', '60s Integrated Sponsor', 'Shorts / Reels', 'Multi-Deliverable Package']
+        && data.status in ['Active', 'Draft', 'Completed']
+        && data.deadline is string && data.deadline.size() >= 1 && data.deadline.size() <= 40
+        && data.keyTalkingPoints is list && data.keyTalkingPoints.size() <= 10
+        && (data.keyTalkingPoints.size() == 0 || (data.keyTalkingPoints[0] is string && data.keyTalkingPoints[0].size() <= 160))
+        && data.isPublic is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidContract(data, docId) {
+      return data.keys().hasAll([
+          'id', 'dealerUid', 'creatorUid', 'dealerId', 'dealerName',
+          'creatorId', 'creatorName', 'creatorHandle', 'campaignId', 'campaignTitle',
+          'feeAmount', 'deliverable', 'escrowStatus', 'dealerSigned', 'creatorSigned',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'dealerUid', 'creatorUid', 'dealerId', 'dealerName',
+          'creatorId', 'creatorName', 'creatorHandle', 'campaignId', 'campaignTitle',
+          'feeAmount', 'deliverable', 'escrowStatus', 'dealerSigned', 'dealerSignatoryName',
+          'dealerDigitalHash', 'creatorSigned', 'creatorSignatoryName', 'creatorDigitalHash',
+          'submissionUrl', 'submissionNotes', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && isValidId(data.id) && data.id == docId
+        && data.dealerUid is string && isValidId(data.dealerUid)
+        && data.creatorUid is string && isValidId(data.creatorUid)
+        && data.dealerId is string && isValidId(data.dealerId)
+        && data.dealerName is string && data.dealerName.size() >= 1 && data.dealerName.size() <= 120
+        && data.creatorId is string && isValidId(data.creatorId)
+        && data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 120
+        && data.creatorHandle is string && data.creatorHandle.size() >= 1 && data.creatorHandle.size() <= 80
+        && data.campaignId is string && isValidId(data.campaignId)
+        && data.campaignTitle is string && data.campaignTitle.size() >= 1 && data.campaignTitle.size() <= 160
+        && data.feeAmount is number && data.feeAmount > 0 && data.feeAmount <= 100000000
+        && data.deliverable is string && data.deliverable.size() >= 1 && data.deliverable.size() <= 400
+        && data.escrowStatus in [
+          'DRAFT', 'SIGNED_BY_DEALER_PENDING_CREATOR', 'ESCROW_FUNDED_ACTIVE',
+          'DELIVERABLE_SUBMITTED', 'APPROVED_PAYOUT_RELEASED', 'DISPUTED'
+        ]
+        && data.dealerSigned is bool
+        && data.creatorSigned is bool
+        && (!('dealerSignatoryName' in data) || (data.dealerSignatoryName is string && data.dealerSignatoryName.size() <= 120))
+        && (!('dealerDigitalHash' in data) || (data.dealerDigitalHash is string && data.dealerDigitalHash.size() <= 128))
+        && (!('creatorSignatoryName' in data) || (data.creatorSignatoryName is string && data.creatorSignatoryName.size() <= 120))
+        && (!('creatorDigitalHash' in data) || (data.creatorDigitalHash is string && data.creatorDigitalHash.size() <= 128))
+        && (!('submissionUrl' in data) || (data.submissionUrl is string && data.submissionUrl.size() <= 500))
+        && (!('submissionNotes' in data) || (data.submissionNotes is string && data.submissionNotes.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidConnection(data, docId) {
+      return data.keys().hasAll([
+          'id', 'dealerUid', 'creatorUid', 'dealerId', 'dealerName',
+          'creatorId', 'creatorName', 'creatorHandle', 'status',
+          'lastMessage', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'dealerUid', 'creatorUid', 'dealerId', 'dealerName',
+          'creatorId', 'creatorName', 'creatorHandle', 'campaignId', 'campaignTitle',
+          'status', 'lastMessage', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && isValidId(data.id) && data.id == docId
+        && data.dealerUid is string && isValidId(data.dealerUid)
+        && data.creatorUid is string && isValidId(data.creatorUid)
+        && data.dealerId is string && isValidId(data.dealerId)
+        && data.dealerName is string && data.dealerName.size() >= 1 && data.dealerName.size() <= 120
+        && data.creatorId is string && isValidId(data.creatorId)
+        && data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 120
+        && data.creatorHandle is string && data.creatorHandle.size() >= 1 && data.creatorHandle.size() <= 80
+        && (!('campaignId' in data) || (data.campaignId is string && data.campaignId.size() <= 128))
+        && (!('campaignTitle' in data) || (data.campaignTitle is string && data.campaignTitle.size() <= 160))
+        && data.status in ['Connected', 'Contract Sent', 'In Progress', 'Completed']
+        && data.lastMessage is string && data.lastMessage.size() >= 1 && data.lastMessage.size() <= 1000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data, docId) {
+      return data.keys().hasAll(['id', 'dealerUid', 'creatorUid', 'senderUid', 'senderRole', 'text', 'createdAt'])
+        && data.keys().hasOnly(['id', 'dealerUid', 'creatorUid', 'senderUid', 'senderRole', 'text', 'createdAt'])
+        && data.id is string && isValidId(data.id) && data.id == docId
+        && data.dealerUid is string && isValidId(data.dealerUid)
+        && data.creatorUid is string && isValidId(data.creatorUid)
+        && data.senderUid is string && isValidId(data.senderUid) && data.senderUid == request.auth.uid
+        && data.senderRole in ['business', 'creator']
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. /users/{userId} - Strictly Owner-Only PII Isolation (NO list)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserAccount(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserAccount(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'dealerProfileId', 'creatorProfileId', 'displayName', 'photoURL', 'updatedAt']))
+        );
+    }
+
+    // 2. /dealers/{dealerId}
+    match /dealers/{dealerId} {
+      allow get: if isSignedIn() && isValidId(dealerId) && (existing().ownerUid == request.auth.uid || existing().isPublic == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.isPublic == true || isAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(dealerId)
+        && isValidDealer(incoming(), dealerId)
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(dealerId)
+        && isValidDealer(incoming(), dealerId)
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'companyName', 'industry', 'website', 'tagline', 'description',
+            'avatar', 'defaultBudget', 'targetAgeRange', 'primaryRegion',
+            'brandValues', 'isPublic', 'updatedAt'
+          ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(dealerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    // 3. /creators/{creatorId}
+    match /creators/{creatorId} {
+      allow get: if isSignedIn() && isValidId(creatorId) && (existing().ownerUid == request.auth.uid || existing().isPublic == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.isPublic == true || isAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(creatorId)
+        && isValidCreator(incoming(), creatorId)
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(creatorId)
+        && isValidCreator(incoming(), creatorId)
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'handle', 'channelUrl', 'platform', 'niche', 'subNiches',
+            'bio', 'avatar', 'subscribers', 'avgViews', 'engagementRate',
+            'rateDedicated', 'rateIntegrated', 'rateShorts', 'credibilityScore',
+            'riskLevel', 'fakeFollowersEstimatePct', 'isPublic', 'updatedAt'
+          ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(creatorId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    // 4. /campaigns/{campaignId}
+    match /campaigns/{campaignId} {
+      allow get: if isSignedIn() && isValidId(campaignId) && (existing().ownerUid == request.auth.uid || existing().isPublic == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.isPublic == true || isAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(campaignId)
+        && isValidCampaign(incoming(), campaignId)
+        && incoming().ownerUid == request.auth.uid
+        && exists(/databases/$(database)/documents/dealers/$(incoming().dealerId))
+        && get(/databases/$(database)/documents/dealers/$(incoming().dealerId)).data.ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(campaignId)
+        && isValidCampaign(incoming(), campaignId)
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().dealerId == existing().dealerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'productName', 'productTagline', 'productCategory', 'description',
+            'targetAudience', 'budget', 'deliverableNeeded', 'status',
+            'deadline', 'keyTalkingPoints', 'isPublic', 'updatedAt'
+          ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(campaignId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    // 5. /contracts/{contractId} - Action-based updates + Terminal State Locking
+    match /contracts/{contractId} {
+      allow get: if isSignedIn() && isValidId(contractId) && (
+        existing().dealerUid == request.auth.uid ||
+        existing().creatorUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.dealerUid == request.auth.uid ||
+        resource.data.creatorUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(contractId)
+        && isValidContract(incoming(), contractId)
+        && incoming().dealerUid == request.auth.uid
+        && incoming().escrowStatus in ['DRAFT', 'SIGNED_BY_DEALER_PENDING_CREATOR', 'ESCROW_FUNDED_ACTIVE']
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(contractId)
+        && isValidContract(incoming(), contractId)
+        && incoming().id == existing().id
+        && incoming().dealerUid == existing().dealerUid
+        && incoming().creatorUid == existing().creatorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().escrowStatus != 'APPROVED_PAYOUT_RELEASED' && (
+              // Action 1: Dealer signs or funds contract
+              (
+                existing().dealerUid == request.auth.uid
+                && incoming().diff(existing()).affectedKeys().hasOnly(['dealerSigned', 'dealerSignatoryName', 'dealerDigitalHash', 'escrowStatus', 'updatedAt'])
+                && incoming().escrowStatus in ['SIGNED_BY_DEALER_PENDING_CREATOR', 'ESCROW_FUNDED_ACTIVE']
+              ) ||
+              // Action 2: Creator signs contract
+              (
+                existing().creatorUid == request.auth.uid
+                && incoming().diff(existing()).affectedKeys().hasOnly(['creatorSigned', 'creatorSignatoryName', 'creatorDigitalHash', 'escrowStatus', 'updatedAt'])
+                && incoming().creatorSigned == true
+                && incoming().escrowStatus == 'ESCROW_FUNDED_ACTIVE'
+              ) ||
+              // Action 3: Creator submits deliverable proof
+              (
+                (existing().creatorUid == request.auth.uid || existing().dealerUid == request.auth.uid)
+                && incoming().diff(existing()).affectedKeys().hasOnly(['submissionUrl', 'submissionNotes', 'escrowStatus', 'updatedAt'])
+                && incoming().escrowStatus == 'DELIVERABLE_SUBMITTED'
+              ) ||
+              // Action 4: Dealer approves & releases escrow payout (terminal)
+              (
+                existing().dealerUid == request.auth.uid
+                && incoming().diff(existing()).affectedKeys().hasOnly(['escrowStatus', 'updatedAt'])
+                && incoming().escrowStatus == 'APPROVED_PAYOUT_RELEASED'
+              )
+            )
+          )
+        );
+    }
+
+    // 6. /connections/{connectionId} and /messages/{messageId}
+    match /connections/{connectionId} {
+      allow get: if isSignedIn() && isValidId(connectionId) && (
+        existing().dealerUid == request.auth.uid ||
+        existing().creatorUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.dealerUid == request.auth.uid ||
+        resource.data.creatorUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerifiedUser()
+        && isValidId(connectionId)
+        && isValidConnection(incoming(), connectionId)
+        && (incoming().dealerUid == request.auth.uid || incoming().creatorUid == request.auth.uid)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(connectionId)
+        && isValidConnection(incoming(), connectionId)
+        && incoming().id == existing().id
+        && incoming().dealerUid == existing().dealerUid
+        && incoming().creatorUid == existing().creatorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            (existing().dealerUid == request.auth.uid || existing().creatorUid == request.auth.uid)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'status', 'updatedAt'])
+          )
+        );
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(connectionId) && isValidId(messageId) && (
+          existing().dealerUid == request.auth.uid ||
+          existing().creatorUid == request.auth.uid ||
+          isAdmin()
+        );
+        allow list: if isSignedIn() && (
+          resource.data.dealerUid == request.auth.uid ||
+          resource.data.creatorUid == request.auth.uid ||
+          isAdmin()
+        );
+        // Pillar 1 (Master Gate) + Pillar 7 (Atomicity Guarantee via getAfter)
+        allow create: if isVerifiedUser()
+          && isValidId(connectionId)
+          && isValidId(messageId)
+          && isValidMessage(incoming(), messageId)
+          && exists(/databases/$(database)/documents/connections/$(connectionId))
+          && (
+            get(/databases/$(database)/documents/connections/$(connectionId)).data.dealerUid == request.auth.uid ||
+            get(/databases/$(database)/documents/connections/$(connectionId)).data.creatorUid == request.auth.uid
+          )
+          && incoming().dealerUid == get(/databases/$(database)/documents/connections/$(connectionId)).data.dealerUid
+          && incoming().creatorUid == get(/databases/$(database)/documents/connections/$(connectionId)).data.creatorUid
+          && incoming().createdAt == request.time
+          && getAfter(/databases/$(database)/documents/connections/$(connectionId)).data.lastMessage == incoming().text
+          && getAfter(/databases/$(database)/documents/connections/$(connectionId)).data.updatedAt == request.time;
+      }
+    }
+
+    // 7. /admins/{adminUid}
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isValidId(adminUid) && (isOwner(adminUid) || isAdmin());
+      allow write: if false;
+    }
+  }
+}

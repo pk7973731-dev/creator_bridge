@@ -1,0 +1,6 @@
+{
+  "name": "CreatorBridge - Influencer Hub & Escrow Contracts",
+  "description": "Two-portal marketplace for Business Dealers and Creators featuring match recommendations, bot & fraud detection, milestone escrow contracts, and trending topic intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

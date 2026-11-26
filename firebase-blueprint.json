@@ -1,0 +1,670 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authenticated user account metadata and active portal role (PII isolated to owner).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "enum": ["business", "creator"]
+        },
+        "dealerProfileId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "creatorProfileId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "photoURL", "role", "createdAt", "updatedAt"]
+    },
+    "DealerProfile": {
+      "title": "DealerProfile",
+      "description": "Public brand profile for a signed-in Business Dealer.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "companyName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "industry": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "website": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "tagline": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "defaultBudget": {
+          "type": "number"
+        },
+        "targetAgeRange": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "primaryRegion": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "brandValues": {
+          "type": "array"
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "companyName",
+        "industry",
+        "website",
+        "tagline",
+        "description",
+        "avatar",
+        "defaultBudget",
+        "targetAgeRange",
+        "primaryRegion",
+        "brandValues",
+        "isPublic",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CreatorProfileDoc": {
+      "title": "CreatorProfileDoc",
+      "description": "Public YouTube/social creator channel profile and verified metrics.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "channelUrl": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["YouTube", "Instagram", "TikTok"]
+        },
+        "niche": {
+          "type": "string",
+          "enum": [
+            "Tech & Gadgets",
+            "Beauty & Skincare",
+            "Fitness & Health",
+            "Finance & Crypto",
+            "Gaming & Hardware",
+            "Food & Cooking",
+            "Travel & Lifestyle"
+          ]
+        },
+        "subNiches": {
+          "type": "array"
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "subscribers": {
+          "type": "number"
+        },
+        "avgViews": {
+          "type": "number"
+        },
+        "engagementRate": {
+          "type": "number"
+        },
+        "rateDedicated": {
+          "type": "number"
+        },
+        "rateIntegrated": {
+          "type": "number"
+        },
+        "rateShorts": {
+          "type": "number"
+        },
+        "credibilityScore": {
+          "type": "number"
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": ["VERIFIED_SAFE", "MODERATE_CAUTION", "HIGH_RISK_SUSPICIOUS"]
+        },
+        "fakeFollowersEstimatePct": {
+          "type": "number"
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "name",
+        "handle",
+        "channelUrl",
+        "platform",
+        "niche",
+        "subNiches",
+        "bio",
+        "avatar",
+        "subscribers",
+        "avgViews",
+        "engagementRate",
+        "rateDedicated",
+        "rateIntegrated",
+        "rateShorts",
+        "credibilityScore",
+        "riskLevel",
+        "fakeFollowersEstimatePct",
+        "isPublic",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProductCampaignDoc": {
+      "title": "ProductCampaignDoc",
+      "description": "Product launch campaign created by a Business Dealer.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "productName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "productTagline": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "productCategory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "targetAudience": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "budget": {
+          "type": "number"
+        },
+        "deliverableNeeded": {
+          "type": "string",
+          "enum": [
+            "Dedicated YouTube Video",
+            "60s Integrated Sponsor",
+            "Shorts / Reels",
+            "Multi-Deliverable Package"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Active", "Draft", "Completed"]
+        },
+        "deadline": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "keyTalkingPoints": {
+          "type": "array"
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "dealerId",
+        "dealerName",
+        "productName",
+        "productTagline",
+        "productCategory",
+        "description",
+        "targetAudience",
+        "budget",
+        "deliverableNeeded",
+        "status",
+        "deadline",
+        "keyTalkingPoints",
+        "isPublic",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DealContractDoc": {
+      "title": "DealContractDoc",
+      "description": "Digital sponsorship & INR escrow contract between a Dealer and Creator.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "creatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "creatorHandle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "campaignId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "campaignTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "feeAmount": {
+          "type": "number"
+        },
+        "deliverable": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "escrowStatus": {
+          "type": "string",
+          "enum": [
+            "DRAFT",
+            "SIGNED_BY_DEALER_PENDING_CREATOR",
+            "ESCROW_FUNDED_ACTIVE",
+            "DELIVERABLE_SUBMITTED",
+            "APPROVED_PAYOUT_RELEASED",
+            "DISPUTED"
+          ]
+        },
+        "dealerSigned": {
+          "type": "boolean"
+        },
+        "dealerSignatoryName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "dealerDigitalHash": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "creatorSigned": {
+          "type": "boolean"
+        },
+        "creatorSignatoryName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "creatorDigitalHash": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "submissionUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "submissionNotes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "dealerUid",
+        "creatorUid",
+        "dealerId",
+        "dealerName",
+        "creatorId",
+        "creatorName",
+        "creatorHandle",
+        "campaignId",
+        "campaignTitle",
+        "feeAmount",
+        "deliverable",
+        "escrowStatus",
+        "dealerSigned",
+        "creatorSigned",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ConnectionLogDoc": {
+      "title": "ConnectionLogDoc",
+      "description": "Direct business-to-creator connection thread header.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "creatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "creatorHandle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "campaignId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "campaignTitle": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Connected", "Contract Sent", "In Progress", "Completed"]
+        },
+        "lastMessage": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "dealerUid",
+        "creatorUid",
+        "dealerId",
+        "dealerName",
+        "creatorId",
+        "creatorName",
+        "creatorHandle",
+        "status",
+        "lastMessage",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ConnectionMessageDoc": {
+      "title": "ConnectionMessageDoc",
+      "description": "Individual message inside a connection thread subcollection.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dealerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["business", "creator"]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "dealerUid", "creatorUid", "senderUid", "senderRole", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Owner-only private authentication profile, email PII, and portal role."
+    },
+    "/dealers/{dealerId}": {
+      "schema": { "$ref": "#/entities/DealerProfile" },
+      "description": "Public brand profiles created by signed-in Business Dealers."
+    },
+    "/creators/{creatorId}": {
+      "schema": { "$ref": "#/entities/CreatorProfileDoc" },
+      "description": "Public creator channel profiles and audited engagement metrics."
+    },
+    "/campaigns/{campaignId}": {
+      "schema": { "$ref": "#/entities/ProductCampaignDoc" },
+      "description": "Product launch campaigns owned by Business Dealers."
+    },
+    "/contracts/{contractId}": {
+      "schema": { "$ref": "#/entities/DealContractDoc" },
+      "description": "Digital sponsorship escrow agreements shared between a dealer and creator."
+    },
+    "/connections/{connectionId}": {
+      "schema": { "$ref": "#/entities/ConnectionLogDoc" },
+      "description": "Connection threads between dealers and creators."
+    },
+    "/connections/{connectionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ConnectionMessageDoc" },
+      "description": "Subcollection of chat messages within a connection thread."
+    }
+  }
+}
