@@ -439,8 +439,29 @@
             "ESCROW_FUNDED_ACTIVE",
             "DELIVERABLE_SUBMITTED",
             "APPROVED_PAYOUT_RELEASED",
-            "DISPUTED"
+            "DISPUTED",
+            "REFUNDED_TO_DEALER"
           ]
+        },
+        "deliverableDescription": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "exclusivityDays": {
+          "type": "number"
+        },
+        "revisionsIncluded": {
+          "type": "number"
+        },
+        "revisionsUsed": {
+          "type": "number"
+        },
+        "revisionFeedback": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "platformFeePct": {
+          "type": "number"
         },
         "dealerSigned": {
           "type": "boolean"
@@ -471,6 +492,40 @@
         "submissionNotes": {
           "type": "string",
           "maxLength": 500
+        },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["UNVERIFIED", "VERIFIED", "PARTIAL_WARNING", "FAILED"]
+        },
+        "verificationSummary": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "verifiedVideoId": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "verifiedChannelMatch": {
+          "type": "boolean"
+        },
+        "verifiedDisclosureFound": {
+          "type": "boolean"
+        },
+        "disputeReason": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "disputedByRole": {
+          "type": "string",
+          "enum": ["business", "creator"]
+        },
+        "resolutionNote": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "escrowReceiptHash": {
+          "type": "string",
+          "maxLength": 128
         },
         "createdAt": {
           "type": "string",

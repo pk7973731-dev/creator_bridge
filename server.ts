@@ -6,6 +6,7 @@ import healthHandler from './api/health.ts';
 import trendsHandler from './api/trends.ts';
 import channelHandler from './api/youtube/channel.ts';
 import searchHandler from './api/youtube/search.ts';
+import verifyVideoHandler from './api/youtube/verify-video.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +22,8 @@ async function startServer() {
   app.get('/api/trends', (req, res) => trendsHandler(req, res));
   app.get('/api/youtube/channel', (req, res) => channelHandler(req, res));
   app.get('/api/youtube/search', (req, res) => searchHandler(req, res));
+  app.get('/api/youtube/verify-video', (req, res) => verifyVideoHandler(req, res));
+  app.post('/api/youtube/verify-video', (req, res) => verifyVideoHandler(req, res));
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

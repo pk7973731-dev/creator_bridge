@@ -37,7 +37,12 @@ export const CreatorDashboard: React.FC<CreatorDashboardProps> = ({ onNavigate }
     .reduce((sum, c) => sum + c.feeAmount, 0);
 
   const totalInEscrow = creatorContracts
-    .filter(c => c.escrowStatus === 'ESCROW_FUNDED_ACTIVE' || c.escrowStatus === 'DELIVERABLE_SUBMITTED')
+    .filter(c =>
+      c.escrowStatus === 'SIGNED_BY_DEALER_PENDING_CREATOR' ||
+      c.escrowStatus === 'ESCROW_FUNDED_ACTIVE' ||
+      c.escrowStatus === 'DELIVERABLE_SUBMITTED' ||
+      c.escrowStatus === 'DISPUTED'
+    )
     .reduce((sum, c) => sum + c.feeAmount, 0);
 
   // Relevant trending topics for this creator's niche

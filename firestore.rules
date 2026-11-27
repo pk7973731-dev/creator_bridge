@@ -164,9 +164,14 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'id', 'dealerUid', 'creatorUid', 'dealerId', 'dealerName',
           'creatorId', 'creatorName', 'creatorHandle', 'campaignId', 'campaignTitle',
-          'feeAmount', 'deliverable', 'escrowStatus', 'dealerSigned', 'dealerSignatoryName',
-          'dealerDigitalHash', 'creatorSigned', 'creatorSignatoryName', 'creatorDigitalHash',
-          'submissionUrl', 'submissionNotes', 'createdAt', 'updatedAt'
+          'feeAmount', 'deliverable', 'escrowStatus', 'deliverableDescription',
+          'exclusivityDays', 'revisionsIncluded', 'revisionsUsed', 'revisionFeedback',
+          'platformFeePct', 'dealerSigned', 'dealerSignatoryName', 'dealerDigitalHash',
+          'creatorSigned', 'creatorSignatoryName', 'creatorDigitalHash',
+          'submissionUrl', 'submissionNotes', 'verificationStatus', 'verificationSummary',
+          'verifiedVideoId', 'verifiedChannelMatch', 'verifiedDisclosureFound',
+          'disputeReason', 'disputedByRole', 'resolutionNote', 'escrowReceiptHash',
+          'createdAt', 'updatedAt'
         ])
         && data.id is string && isValidId(data.id) && data.id == docId
         && data.dealerUid is string && isValidId(data.dealerUid)
@@ -182,16 +187,32 @@ service cloud.firestore {
         && data.deliverable is string && data.deliverable.size() >= 1 && data.deliverable.size() <= 400
         && data.escrowStatus in [
           'DRAFT', 'SIGNED_BY_DEALER_PENDING_CREATOR', 'ESCROW_FUNDED_ACTIVE',
-          'DELIVERABLE_SUBMITTED', 'APPROVED_PAYOUT_RELEASED', 'DISPUTED'
+          'DELIVERABLE_SUBMITTED', 'APPROVED_PAYOUT_RELEASED', 'DISPUTED',
+          'REFUNDED_TO_DEALER'
         ]
         && data.dealerSigned is bool
         && data.creatorSigned is bool
+        && (!('deliverableDescription' in data) || (data.deliverableDescription is string && data.deliverableDescription.size() <= 1000))
+        && (!('exclusivityDays' in data) || (data.exclusivityDays is number && data.exclusivityDays >= 0 && data.exclusivityDays <= 365))
+        && (!('revisionsIncluded' in data) || (data.revisionsIncluded is number && data.revisionsIncluded >= 0 && data.revisionsIncluded <= 10))
+        && (!('revisionsUsed' in data) || (data.revisionsUsed is number && data.revisionsUsed >= 0 && data.revisionsUsed <= 10))
+        && (!('revisionFeedback' in data) || (data.revisionFeedback is string && data.revisionFeedback.size() <= 500))
+        && (!('platformFeePct' in data) || (data.platformFeePct is number && data.platformFeePct >= 0 && data.platformFeePct <= 30))
         && (!('dealerSignatoryName' in data) || (data.dealerSignatoryName is string && data.dealerSignatoryName.size() <= 120))
         && (!('dealerDigitalHash' in data) || (data.dealerDigitalHash is string && data.dealerDigitalHash.size() <= 128))
         && (!('creatorSignatoryName' in data) || (data.creatorSignatoryName is string && data.creatorSignatoryName.size() <= 120))
         && (!('creatorDigitalHash' in data) || (data.creatorDigitalHash is string && data.creatorDigitalHash.size() <= 128))
         && (!('submissionUrl' in data) || (data.submissionUrl is string && data.submissionUrl.size() <= 500))
         && (!('submissionNotes' in data) || (data.submissionNotes is string && data.submissionNotes.size() <= 500))
+        && (!('verificationStatus' in data) || data.verificationStatus in ['UNVERIFIED', 'VERIFIED', 'PARTIAL_WARNING', 'FAILED'])
+        && (!('verificationSummary' in data) || (data.verificationSummary is string && data.verificationSummary.size() <= 500))
+        && (!('verifiedVideoId' in data) || (data.verifiedVideoId is string && data.verifiedVideoId.size() <= 32))
+        && (!('verifiedChannelMatch' in data) || data.verifiedChannelMatch is bool)
+        && (!('verifiedDisclosureFound' in data) || data.verifiedDisclosureFound is bool)
+        && (!('disputeReason' in data) || (data.disputeReason is string && data.disputeReason.size() <= 500))
+        && (!('disputedByRole' in data) || data.disputedByRole in ['business', 'creator'])
+        && (!('resolutionNote' in data) || (data.resolutionNote is string && data.resolutionNote.size() <= 500))
+        && (!('escrowReceiptHash' in data) || (data.escrowReceiptHash is string && data.escrowReceiptHash.size() <= 128))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -376,31 +397,70 @@ service cloud.firestore {
         && (
           isAdmin() ||
           (
-            existing().escrowStatus != 'APPROVED_PAYOUT_RELEASED' && (
+            !(existing().escrowStatus in ['APPROVED_PAYOUT_RELEASED', 'REFUNDED_TO_DEALER']) && (
               // Action 1: Dealer signs or funds contract
               (
                 existing().dealerUid == request.auth.uid
                 && incoming().diff(existing()).affectedKeys().hasOnly(['dealerSigned', 'dealerSignatoryName', 'dealerDigitalHash', 'escrowStatus', 'updatedAt'])
                 && incoming().escrowStatus in ['SIGNED_BY_DEALER_PENDING_CREATOR', 'ESCROW_FUNDED_ACTIVE']
               ) ||
-              // Action 2: Creator signs contract
+              // Action 2: Creator counter-signs contract
               (
                 existing().creatorUid == request.auth.uid
                 && incoming().diff(existing()).affectedKeys().hasOnly(['creatorSigned', 'creatorSignatoryName', 'creatorDigitalHash', 'escrowStatus', 'updatedAt'])
                 && incoming().creatorSigned == true
                 && incoming().escrowStatus == 'ESCROW_FUNDED_ACTIVE'
               ) ||
-              // Action 3: Creator submits deliverable proof
+              // Action 3: Creator or dealer submits deliverable proof (requires creator signature)
               (
                 (existing().creatorUid == request.auth.uid || existing().dealerUid == request.auth.uid)
-                && incoming().diff(existing()).affectedKeys().hasOnly(['submissionUrl', 'submissionNotes', 'escrowStatus', 'updatedAt'])
+                && existing().creatorSigned == true
+                && existing().escrowStatus in ['ESCROW_FUNDED_ACTIVE', 'DELIVERABLE_SUBMITTED']
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'submissionUrl', 'submissionNotes', 'verificationStatus', 'verificationSummary',
+                  'verifiedVideoId', 'verifiedChannelMatch', 'verifiedDisclosureFound',
+                  'escrowStatus', 'updatedAt'
+                ])
                 && incoming().escrowStatus == 'DELIVERABLE_SUBMITTED'
               ) ||
-              // Action 4: Dealer approves & releases escrow payout (terminal)
+              // Action 4: Attach or refresh live YouTube verification report while under review
+              (
+                (existing().creatorUid == request.auth.uid || existing().dealerUid == request.auth.uid)
+                && existing().escrowStatus == 'DELIVERABLE_SUBMITTED'
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'verificationStatus', 'verificationSummary', 'verifiedVideoId',
+                  'verifiedChannelMatch', 'verifiedDisclosureFound', 'updatedAt'
+                ])
+                && incoming().escrowStatus == 'DELIVERABLE_SUBMITTED'
+              ) ||
+              // Action 5: Dealer requests revision and returns deliverable to creator
               (
                 existing().dealerUid == request.auth.uid
-                && incoming().diff(existing()).affectedKeys().hasOnly(['escrowStatus', 'updatedAt'])
+                && existing().escrowStatus == 'DELIVERABLE_SUBMITTED'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['revisionsUsed', 'revisionFeedback', 'escrowStatus', 'updatedAt'])
+                && incoming().escrowStatus == 'ESCROW_FUNDED_ACTIVE'
+              ) ||
+              // Action 6: Either party freezes escrow / raises dispute
+              (
+                (existing().dealerUid == request.auth.uid || existing().creatorUid == request.auth.uid)
+                && existing().escrowStatus in ['ESCROW_FUNDED_ACTIVE', 'DELIVERABLE_SUBMITTED']
+                && incoming().diff(existing()).affectedKeys().hasOnly(['disputeReason', 'disputedByRole', 'escrowStatus', 'updatedAt'])
+                && incoming().escrowStatus == 'DISPUTED'
+              ) ||
+              // Action 7: Dealer approves & releases escrow payout (terminal; requires creator signature & submitted/disputed state)
+              (
+                existing().dealerUid == request.auth.uid
+                && existing().creatorSigned == true
+                && existing().escrowStatus in ['DELIVERABLE_SUBMITTED', 'DISPUTED']
+                && incoming().diff(existing()).affectedKeys().hasOnly(['escrowStatus', 'escrowReceiptHash', 'resolutionNote', 'updatedAt'])
                 && incoming().escrowStatus == 'APPROVED_PAYOUT_RELEASED'
+              ) ||
+              // Action 8: Dispute settlement refund to dealer (terminal)
+              (
+                (existing().creatorUid == request.auth.uid || existing().dealerUid == request.auth.uid)
+                && existing().escrowStatus == 'DISPUTED'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['escrowStatus', 'escrowReceiptHash', 'resolutionNote', 'updatedAt'])
+                && incoming().escrowStatus == 'REFUNDED_TO_DEALER'
               )
             )
           )

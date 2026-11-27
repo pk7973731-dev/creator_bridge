@@ -35,6 +35,8 @@ import {
   BusinessDealerProfile,
   ProductCampaign,
   DealContract,
+  DeliverableVerification,
+  EscrowAuditEvent,
   ConnectionLog,
   TrendingTopic,
   MessageLog,
@@ -155,8 +157,23 @@ interface AppContextType {
   ) => string;
   signContractAsDealer: (contractId: string, signatoryName: string) => void;
   signContractAsCreator: (contractId: string, signatoryName: string) => void;
-  submitDeliverableProof: (contractId: string, url: string, notes?: string) => void;
-  approveAndReleaseEscrow: (contractId: string) => void;
+  verifyYouTubeProofUrl: (params: {
+    url: string;
+    expectedCreatorHandle?: string;
+    expectedCreatorName?: string;
+    expectedKeywords?: string[];
+    contractId?: string;
+  }) => Promise<DeliverableVerification>;
+  submitDeliverableProof: (
+    contractId: string,
+    url: string,
+    notes?: string,
+    verification?: DeliverableVerification
+  ) => void;
+  requestContractRevision: (contractId: string, feedback: string) => void;
+  raiseEscrowDispute: (contractId: string, reason: string) => void;
+  resolveEscrowDispute: (contractId: string, resolution: 'release' | 'refund', note: string) => void;
+  approveAndReleaseEscrow: (contractId: string, confirmationNote?: string) => void;
   initiateConnection: (creatorId: string, campaignId?: string, message?: string) => string;
   sendMessage: (connectionId: string, text: string) => void;
   updateCreatorProfile: (profile: Partial<CreatorProfile>) => void;
@@ -216,7 +233,7 @@ function hydrateCreatorDoc(data: any): CreatorWithOwner {
     ownerUid: data.ownerUid,
     name: data.name,
     handle: data.handle,
-    avatar: data.avatar || '/src/assets/images/creator_avatar_tech_1794494846107.jpg',
+    avatar: data.avatar || '/assets/images/creators/tech.jpg',
     channelUrl: data.channelUrl || 'https://youtube.com',
     platform: data.platform || 'YouTube',
     niche: data.niche || 'Tech & Gadgets',
@@ -286,6 +303,80 @@ function hydrateContractDoc(data: any): ContractWithOwners {
   const status = data.escrowStatus as DealContract['escrowStatus'];
   const createdStr = formatFirestoreTimestamp(data.createdAt);
   const updatedStr = formatFirestoreTimestamp(data.updatedAt);
+  const createdTimeStr = formatFirestoreDateTime(data.createdAt);
+  const updatedTimeStr = formatFirestoreDateTime(data.updatedAt);
+  const feeAmount = Number(data.feeAmount) || 0;
+  const platformFeePct = typeof data.platformFeePct === 'number' ? data.platformFeePct : 5;
+  const revisionsIncluded = typeof data.revisionsIncluded === 'number' ? data.revisionsIncluded : 2;
+  const revisionsUsed = typeof data.revisionsUsed === 'number' ? data.revisionsUsed : 0;
+
+  const auditEvents: EscrowAuditEvent[] = [];
+  if (data.dealerSigned) {
+    auditEvents.push({
+      id: `evt_${data.id}_funded`,
+      action: 'Escrow Vault Funded & Dealer Signed',
+      actor: data.dealerSignatoryName || data.dealerName,
+      role: 'business',
+      timestamp: createdTimeStr,
+      detail: `Locked ₹${feeAmount.toLocaleString()} INR into escrow (${platformFeePct}% protection fee).`,
+      txHash: data.dealerDigitalHash,
+    });
+  }
+  if (data.creatorSigned) {
+    auditEvents.push({
+      id: `evt_${data.id}_csign`,
+      action: 'Creator Counter-Signed Agreement',
+      actor: data.creatorSignatoryName || data.creatorName,
+      role: 'creator',
+      timestamp: updatedTimeStr,
+      detail: 'Accepted deliverable requirements, exclusivity, and #ad disclosure clauses.',
+      txHash: data.creatorDigitalHash,
+    });
+  }
+  if (data.submissionUrl) {
+    auditEvents.push({
+      id: `evt_${data.id}_proof`,
+      action: 'Deliverable Proof Submitted',
+      actor: data.creatorName,
+      role: 'creator',
+      timestamp: updatedTimeStr,
+      detail: data.verificationSummary || `Submitted deliverable link: ${data.submissionUrl}`,
+    });
+  }
+  if (data.revisionFeedback) {
+    auditEvents.push({
+      id: `evt_${data.id}_rev`,
+      action: `Revision Requested (${revisionsUsed}/${revisionsIncluded})`,
+      actor: data.dealerName,
+      role: 'business',
+      timestamp: updatedTimeStr,
+      detail: data.revisionFeedback,
+    });
+  }
+  if (data.disputeReason) {
+    auditEvents.push({
+      id: `evt_${data.id}_disp`,
+      action: 'Escrow Frozen Under Dispute',
+      actor: data.disputedByRole === 'creator' ? data.creatorName : data.dealerName,
+      role: data.disputedByRole === 'creator' ? 'creator' : 'business',
+      timestamp: updatedTimeStr,
+      detail: data.disputeReason,
+    });
+  }
+  if (status === 'APPROVED_PAYOUT_RELEASED' || status === 'REFUNDED_TO_DEALER') {
+    auditEvents.push({
+      id: `evt_${data.id}_settled`,
+      action:
+        status === 'APPROVED_PAYOUT_RELEASED'
+          ? 'Escrow Payout Released to Creator'
+          : 'Disputed Escrow Refunded to Dealer',
+      actor: 'CreatorBridge Escrow Vault',
+      role: 'escrow_vault',
+      timestamp: updatedTimeStr,
+      detail: data.resolutionNote || 'Final escrow settlement recorded.',
+      txHash: data.escrowReceiptHash,
+    });
+  }
 
   return {
     id: data.id,
@@ -299,22 +390,25 @@ function hydrateContractDoc(data: any): ContractWithOwners {
     creatorName: data.creatorName,
     creatorHandle: data.creatorHandle,
     deliverable: data.deliverable,
-    feeAmount: Number(data.feeAmount) || 0,
+    feeAmount,
+    platformFeePct,
     escrowStatus: status,
     terms: {
-      deliverableDescription: data.deliverable,
-      exclusivityDays: 14,
+      deliverableDescription: data.deliverableDescription || data.deliverable,
+      exclusivityDays: typeof data.exclusivityDays === 'number' ? data.exclusivityDays : 14,
       disclosureRequirement: 'Clear #ad disclosure & verbal sponsor acknowledgment in first 30s',
       approvalWindowDays: 3,
-      revisionsIncluded: 2,
+      revisionsIncluded,
       usageRights: '90-day brand digital & social repost rights',
       cancellationPolicy: 'Full escrow refund if cancelled prior to draft submission',
     },
+    revisionsUsed,
+    revisionFeedback: data.revisionFeedback,
     dealerSignature: data.dealerSigned
       ? {
           signed: true,
           signatoryName: data.dealerSignatoryName || `${data.dealerName} Representative`,
-          signedAt: formatFirestoreDateTime(data.createdAt),
+          signedAt: createdTimeStr,
           digitalHash: data.dealerDigitalHash || 'CB-SHA256-DEALER',
         }
       : undefined,
@@ -322,17 +416,36 @@ function hydrateContractDoc(data: any): ContractWithOwners {
       ? {
           signed: true,
           signatoryName: data.creatorSignatoryName || data.creatorName,
-          signedAt: formatFirestoreDateTime(data.updatedAt),
+          signedAt: updatedTimeStr,
           digitalHash: data.creatorDigitalHash || 'CB-SHA256-CREATOR',
         }
       : undefined,
     submissionProof: data.submissionUrl
       ? {
           url: data.submissionUrl,
-          submittedAt: formatFirestoreDateTime(data.updatedAt),
+          submittedAt: updatedTimeStr,
           notes: data.submissionNotes,
         }
       : undefined,
+    verification: data.verificationStatus
+      ? {
+          status: data.verificationStatus,
+          summary: data.verificationSummary || 'Verification check recorded.',
+          videoId: data.verifiedVideoId,
+          channelMatch: data.verifiedChannelMatch,
+          disclosureFound: data.verifiedDisclosureFound,
+        }
+      : undefined,
+    dispute: data.disputeReason
+      ? {
+          reason: data.disputeReason,
+          raisedByRole: data.disputedByRole === 'creator' ? 'creator' : 'business',
+          raisedAt: updatedTimeStr,
+        }
+      : undefined,
+    resolutionNote: data.resolutionNote,
+    escrowReceiptHash: data.escrowReceiptHash,
+    auditEvents,
     milestones: [
       {
         title: 'Digital Contract & Escrow Funded',
@@ -345,22 +458,44 @@ function hydrateContractDoc(data: any): ContractWithOwners {
         timestamp: data.creatorSigned ? updatedStr : undefined,
       },
       {
-        title: 'Deliverable Draft Submission & Review',
+        title: 'Deliverable Draft Submission & Audit',
         status:
           status === 'APPROVED_PAYOUT_RELEASED'
             ? 'Completed'
+            : status === 'DISPUTED'
+            ? 'Disputed'
+            : status === 'REFUNDED_TO_DEALER'
+            ? 'Refunded'
             : status === 'DELIVERABLE_SUBMITTED'
             ? 'In Review'
+            : data.revisionFeedback
+            ? 'Revision Requested'
             : 'Pending',
         timestamp:
-          status === 'DELIVERABLE_SUBMITTED' || status === 'APPROVED_PAYOUT_RELEASED'
+          status === 'DELIVERABLE_SUBMITTED' ||
+          status === 'APPROVED_PAYOUT_RELEASED' ||
+          status === 'DISPUTED' ||
+          status === 'REFUNDED_TO_DEALER'
             ? updatedStr
             : undefined,
       },
       {
-        title: 'Escrow Funds Released to Creator',
-        status: status === 'APPROVED_PAYOUT_RELEASED' ? 'Completed' : 'Pending',
-        timestamp: status === 'APPROVED_PAYOUT_RELEASED' ? updatedStr : undefined,
+        title:
+          status === 'REFUNDED_TO_DEALER'
+            ? 'Escrow Refunded to Business Dealer'
+            : 'Escrow Funds Released to Creator',
+        status:
+          status === 'APPROVED_PAYOUT_RELEASED'
+            ? 'Completed'
+            : status === 'REFUNDED_TO_DEALER'
+            ? 'Refunded'
+            : status === 'DISPUTED'
+            ? 'Disputed'
+            : 'Pending',
+        timestamp:
+          status === 'APPROVED_PAYOUT_RELEASED' || status === 'REFUNDED_TO_DEALER'
+            ? updatedStr
+            : undefined,
       },
     ],
     createdAt: createdStr,
@@ -791,7 +926,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         niche: payload.creatorInput.niche,
         subNiches: ['Verified Account', 'YouTube'],
         bio: sanitizeText(payload.creatorInput.bio, BLUEPRINT_LIMITS.DESCRIPTION_MAX, 'Content Creator'),
-        avatar: sanitizeText(authUser.photoURL, BLUEPRINT_LIMITS.AVATAR_MAX, '/src/assets/images/creator_avatar_tech_1794494846107.jpg'),
+        avatar: sanitizeText(authUser.photoURL, BLUEPRINT_LIMITS.AVATAR_MAX, '/assets/images/creators/tech.jpg'),
         subscribers: Math.max(0, Number(payload.creatorInput.subscribers) || 0),
         avgViews: Math.max(0, Number(payload.creatorInput.avgViews) || 0),
         engagementRate: Math.min(100, Math.max(0, Number(payload.creatorInput.engagementRate) || 3.2)),
@@ -1034,6 +1169,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const notifyContractThread = (dealerId: string, creatorId: string, message: string) => {
+    const conn = connections.find(c => c.dealerId === dealerId && c.creatorId === creatorId);
+    if (conn) {
+      sendMessage(conn.id, message);
+    }
+  };
+
   const createContract = (
     contractData: Omit<DealContract, 'id' | 'createdAt' | 'updatedAt' | 'dealerSignature' | 'creatorSignature'>
   ): string => {
@@ -1046,21 +1188,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     const targetCreator = creators.find(c => c.id === contractData.creatorId) as CreatorWithOwner | undefined;
     const creatorUid = targetCreator?.ownerUid || authUser?.uid || 'local_creator';
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
+    const platformFeePct = contractData.platformFeePct ?? 5;
+    const revisionsIncluded = contractData.terms?.revisionsIncluded ?? 2;
+    const exclusivityDays = contractData.terms?.exclusivityDays ?? 14;
+    const deliverableDescription = contractData.terms?.deliverableDescription || contractData.deliverable;
 
     const newContract: ContractWithOwners = {
       ...contractData,
       id: newId,
       dealerUid: authUser?.uid,
       creatorUid,
-      escrowStatus: 'ESCROW_FUNDED_ACTIVE',
+      platformFeePct,
+      revisionsUsed: 0,
+      escrowStatus: 'SIGNED_BY_DEALER_PENDING_CREATOR',
       dealerSignature: {
         signed: true,
         signatoryName: `${contractData.dealerName} Authorized Representative`,
-        signedAt: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
+        signedAt: nowUtc,
         digitalHash: hash,
       },
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0],
+      auditEvents: [
+        {
+          id: `evt_${Date.now()}_create`,
+          action: 'Escrow Vault Funded & Dealer Signed',
+          actor: contractData.dealerName,
+          role: 'business',
+          timestamp: nowUtc,
+          detail: `Locked ₹${contractData.feeAmount.toLocaleString()} INR into escrow (${platformFeePct}% protection fee). Awaiting creator counter-signature.`,
+          txHash: hash,
+        },
+      ],
+      createdAt: todayStr,
+      updatedAt: todayStr,
     };
 
     setLocalContracts(prev => [newContract, ...prev]);
@@ -1079,7 +1240,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         campaignTitle: sanitizeText(contractData.campaignTitle, BLUEPRINT_LIMITS.TITLE_MAX, 'Campaign'),
         feeAmount: Math.max(1, Number(contractData.feeAmount) || 1000),
         deliverable: sanitizeText(contractData.deliverable, BLUEPRINT_LIMITS.DELIVERABLE_MAX, 'Sponsored Deliverable'),
-        escrowStatus: 'ESCROW_FUNDED_ACTIVE',
+        deliverableDescription: sanitizeText(deliverableDescription, BLUEPRINT_LIMITS.DESCRIPTION_MAX, 'Sponsored Deliverable'),
+        exclusivityDays: Math.min(365, Math.max(0, Number(exclusivityDays) || 14)),
+        revisionsIncluded: Math.min(10, Math.max(0, Number(revisionsIncluded) || 2)),
+        revisionsUsed: 0,
+        platformFeePct: Math.min(30, Math.max(0, Number(platformFeePct) || 5)),
+        escrowStatus: 'SIGNED_BY_DEALER_PENDING_CREATOR',
         dealerSigned: true,
         dealerSignatoryName: sanitizeText(`${contractData.dealerName} Authorized Representative`, BLUEPRINT_LIMITS.NAME_MAX),
         dealerDigitalHash: sanitizeText(hash, 128),
@@ -1092,7 +1258,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initiateConnection(
       contractData.creatorId,
       contractData.campaignId,
-      `Formal Escrow Agreement drafted and ₹${contractData.feeAmount.toLocaleString()} funded into escrow.`
+      `Escrow Agreement (${newId}) drafted and ₹${contractData.feeAmount.toLocaleString()} INR locked in escrow. Awaiting creator counter-signature.`
     );
 
     return newId;
@@ -1106,6 +1272,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nextStatus = target?.creatorSignature?.signed
       ? 'ESCROW_FUNDED_ACTIVE'
       : 'SIGNED_BY_DEALER_PENDING_CREATOR';
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
 
     setLocalContracts(prev =>
       prev.map(c =>
@@ -1116,11 +1284,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               dealerSignature: {
                 signed: true,
                 signatoryName,
-                signedAt: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
+                signedAt: nowUtc,
                 digitalHash: hash,
               },
               escrowStatus: nextStatus,
-              updatedAt: new Date().toISOString().split('T')[0],
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_dsign`,
+                  action: 'Dealer Signed Contract',
+                  actor: signatoryName,
+                  role: 'business',
+                  timestamp: nowUtc,
+                  detail: 'Authorized escrow lock.',
+                  txHash: hash,
+                },
+              ],
+              updatedAt: todayStr,
             }
       )
     );
@@ -1141,6 +1321,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const hash = target
       ? generateDigitalContractHash(contractId, target.dealerName, signatoryName, target.feeAmount)
       : 'CB-SIG-CREATOR';
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
 
     setLocalContracts(prev =>
       prev.map(c =>
@@ -1151,16 +1333,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               creatorSignature: {
                 signed: true,
                 signatoryName,
-                signedAt: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
+                signedAt: nowUtc,
                 digitalHash: hash,
               },
               escrowStatus: 'ESCROW_FUNDED_ACTIVE',
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_csign`,
+                  action: 'Creator Counter-Signed Agreement',
+                  actor: signatoryName,
+                  role: 'creator',
+                  timestamp: nowUtc,
+                  detail: 'Dual-signed agreement active. Escrow funds protected until verified delivery.',
+                  txHash: hash,
+                },
+              ],
               milestones: c.milestones.map(m =>
-                m.title.includes('Signed')
-                  ? { ...m, status: 'Completed', timestamp: new Date().toISOString().split('T')[0] }
+                m.title.includes('Signed') || m.title.includes('Counter-Signature')
+                  ? { ...m, status: 'Completed', timestamp: todayStr }
                   : m
               ),
-              updatedAt: new Date().toISOString().split('T')[0],
+              updatedAt: todayStr,
             }
       )
     );
@@ -1174,9 +1368,113 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: serverTimestamp(),
       }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `contracts/${contractId}`));
     }
+
+    if (target) {
+      notifyContractThread(
+        target.dealerId,
+        target.creatorId,
+        `Agreement counter-signed by ${signatoryName}. Escrow (${contractId}) is now dual-signed and active.`
+      );
+    }
   };
 
-  const submitDeliverableProof = (contractId: string, url: string, notes?: string) => {
+  const verifyYouTubeProofUrl = async (params: {
+    url: string;
+    expectedCreatorHandle?: string;
+    expectedCreatorName?: string;
+    expectedKeywords?: string[];
+    contractId?: string;
+  }): Promise<DeliverableVerification> => {
+    const res = await fetch('/api/youtube/verify-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: params.url,
+        expectedCreatorHandle: params.expectedCreatorHandle,
+        expectedCreatorName: params.expectedCreatorName,
+        expectedKeywords: params.expectedKeywords || [],
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || 'YouTube deliverable verification failed.');
+    }
+
+    const verification: DeliverableVerification = {
+      status: data.verificationStatus || 'UNVERIFIED',
+      summary: data.summary || 'Verification completed.',
+      videoId: data.videoId,
+      title: data.title,
+      channelTitle: data.channelTitle,
+      channelHandle: data.channelHandle,
+      channelMatch: data.channelMatched,
+      disclosureFound: data.disclosureDetected,
+      privacyStatus: data.privacyStatus,
+      durationFormatted: data.durationFormatted,
+      views: data.views,
+      likes: data.likes,
+      verifiedAt: data.verifiedAt,
+      checks: data.checks,
+    };
+
+    if (params.contractId) {
+      const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+      const todayStr = new Date().toISOString().split('T')[0];
+      const targetContract = contracts.find(c => c.id === params.contractId);
+
+      setLocalContracts(prev =>
+        prev.map(c =>
+          c.id !== params.contractId
+            ? c
+            : {
+                ...c,
+                verification,
+                auditEvents: [
+                  ...(c.auditEvents || []),
+                  {
+                    id: `evt_${Date.now()}_ytcheck`,
+                    action: `YouTube API Audit: ${verification.status}`,
+                    actor: activeRole === 'business' ? currentDealer.companyName : currentCreator.name,
+                    role: activeRole,
+                    timestamp: nowUtc,
+                    detail: verification.summary,
+                  },
+                ],
+                updatedAt: todayStr,
+              }
+        )
+      );
+
+      if (
+        authUser &&
+        targetContract?.escrowStatus === 'DELIVERABLE_SUBMITTED' &&
+        [...fsDealerContracts, ...fsCreatorContracts].some(c => c.id === params.contractId)
+      ) {
+        updateDoc(doc(db, 'contracts', params.contractId), {
+          verificationStatus: verification.status,
+          verificationSummary: sanitizeText(verification.summary, BLUEPRINT_LIMITS.SUMMARY_MAX),
+          verifiedVideoId: sanitizeText(verification.videoId, BLUEPRINT_LIMITS.VIDEO_ID_MAX),
+          verifiedChannelMatch: verification.channelMatch !== false,
+          verifiedDisclosureFound: Boolean(verification.disclosureFound),
+          updatedAt: serverTimestamp(),
+        }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `contracts/${params.contractId}`));
+      }
+    }
+
+    return verification;
+  };
+
+  const submitDeliverableProof = (
+    contractId: string,
+    url: string,
+    notes?: string,
+    verification?: DeliverableVerification
+  ) => {
+    const target = contracts.find(c => c.id === contractId);
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
+
     setLocalContracts(prev =>
       prev.map(c =>
         c.id !== contractId
@@ -1186,15 +1484,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               escrowStatus: 'DELIVERABLE_SUBMITTED',
               submissionProof: {
                 url,
-                submittedAt: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
+                submittedAt: nowUtc,
                 notes,
               },
+              verification: verification || c.verification,
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_submit`,
+                  action: 'Deliverable Proof Submitted for Escrow Review',
+                  actor: c.creatorName,
+                  role: 'creator',
+                  timestamp: nowUtc,
+                  detail: verification
+                    ? `${url} — ${verification.summary}`
+                    : `Submitted URL: ${url}`,
+                },
+              ],
               milestones: c.milestones.map(m =>
-                m.title.includes('Review') || m.title.includes('Submission') || m.title.includes('Draft')
-                  ? { ...m, status: 'In Review', timestamp: new Date().toISOString().split('T')[0] }
+                m.title.includes('Review') || m.title.includes('Submission') || m.title.includes('Draft') || m.title.includes('Audit')
+                  ? { ...m, status: 'In Review', timestamp: todayStr }
                   : m
               ),
-              updatedAt: new Date().toISOString().split('T')[0],
+              updatedAt: todayStr,
             }
       )
     );
@@ -1206,15 +1518,220 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: serverTimestamp(),
       };
       if (notes && notes.trim()) {
-        updateData.submissionNotes = sanitizeText(notes, BLUEPRINT_LIMITS.AVATAR_MAX);
+        updateData.submissionNotes = sanitizeText(notes, BLUEPRINT_LIMITS.NOTES_MAX);
+      }
+      if (verification) {
+        updateData.verificationStatus = verification.status;
+        updateData.verificationSummary = sanitizeText(verification.summary, BLUEPRINT_LIMITS.SUMMARY_MAX);
+        if (verification.videoId) {
+          updateData.verifiedVideoId = sanitizeText(verification.videoId, BLUEPRINT_LIMITS.VIDEO_ID_MAX);
+        }
+        updateData.verifiedChannelMatch = verification.channelMatch !== false;
+        updateData.verifiedDisclosureFound = Boolean(verification.disclosureFound);
       }
       updateDoc(doc(db, 'contracts', contractId), updateData).catch(err =>
         handleFirestoreError(err, OperationType.UPDATE, `contracts/${contractId}`)
       );
     }
+
+    if (target) {
+      notifyContractThread(
+        target.dealerId,
+        target.creatorId,
+        `Deliverable proof submitted for "${target.campaignTitle}": ${url}${verification ? ` (YouTube Audit: ${verification.status})` : ''}.`
+      );
+    }
   };
 
-  const approveAndReleaseEscrow = (contractId: string) => {
+  const requestContractRevision = (contractId: string, feedback: string) => {
+    const target = contracts.find(c => c.id === contractId);
+    const cleanFeedback = sanitizeText(feedback, BLUEPRINT_LIMITS.NOTES_MAX);
+    if (!cleanFeedback) return;
+
+    const nextRevisionsUsed = Math.min(10, (target?.revisionsUsed || 0) + 1);
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    setLocalContracts(prev =>
+      prev.map(c =>
+        c.id !== contractId
+          ? c
+          : {
+              ...c,
+              escrowStatus: 'ESCROW_FUNDED_ACTIVE',
+              revisionsUsed: nextRevisionsUsed,
+              revisionFeedback: cleanFeedback,
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_rev`,
+                  action: `Revision Requested (#${nextRevisionsUsed})`,
+                  actor: c.dealerName,
+                  role: 'business',
+                  timestamp: nowUtc,
+                  detail: cleanFeedback,
+                },
+              ],
+              milestones: c.milestones.map(m =>
+                m.title.includes('Review') || m.title.includes('Audit') || m.title.includes('Submission')
+                  ? { ...m, status: 'Revision Requested', timestamp: todayStr }
+                  : m
+              ),
+              updatedAt: todayStr,
+            }
+      )
+    );
+
+    if (authUser && [...fsDealerContracts, ...fsCreatorContracts].some(c => c.id === contractId)) {
+      updateDoc(doc(db, 'contracts', contractId), {
+        escrowStatus: 'ESCROW_FUNDED_ACTIVE',
+        revisionsUsed: nextRevisionsUsed,
+        revisionFeedback: cleanFeedback,
+        updatedAt: serverTimestamp(),
+      }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `contracts/${contractId}`));
+    }
+
+    if (target) {
+      notifyContractThread(
+        target.dealerId,
+        target.creatorId,
+        `Revision #${nextRevisionsUsed} requested on "${target.campaignTitle}": ${cleanFeedback}`
+      );
+    }
+  };
+
+  const raiseEscrowDispute = (contractId: string, reason: string) => {
+    const target = contracts.find(c => c.id === contractId);
+    const cleanReason = sanitizeText(reason, BLUEPRINT_LIMITS.NOTES_MAX);
+    if (!cleanReason) return;
+
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    setLocalContracts(prev =>
+      prev.map(c =>
+        c.id !== contractId
+          ? c
+          : {
+              ...c,
+              escrowStatus: 'DISPUTED',
+              dispute: {
+                reason: cleanReason,
+                raisedByRole: activeRole,
+                raisedAt: nowUtc,
+              },
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_disp`,
+                  action: 'Escrow Frozen Under Dispute',
+                  actor: activeRole === 'business' ? c.dealerName : c.creatorName,
+                  role: activeRole,
+                  timestamp: nowUtc,
+                  detail: cleanReason,
+                },
+              ],
+              milestones: c.milestones.map(m =>
+                m.status === 'Pending' || m.status === 'In Review' || m.status === 'Revision Requested'
+                  ? { ...m, status: 'Disputed', timestamp: todayStr }
+                  : m
+              ),
+              updatedAt: todayStr,
+            }
+      )
+    );
+
+    if (authUser && [...fsDealerContracts, ...fsCreatorContracts].some(c => c.id === contractId)) {
+      updateDoc(doc(db, 'contracts', contractId), {
+        escrowStatus: 'DISPUTED',
+        disputeReason: cleanReason,
+        disputedByRole: activeRole,
+        updatedAt: serverTimestamp(),
+      }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `contracts/${contractId}`));
+    }
+
+    if (target) {
+      notifyContractThread(
+        target.dealerId,
+        target.creatorId,
+        `ESCROW FROZEN (Dispute raised by ${activeRole === 'business' ? target.dealerName : target.creatorName}): ${cleanReason}`
+      );
+    }
+  };
+
+  const resolveEscrowDispute = (contractId: string, resolution: 'release' | 'refund', note: string) => {
+    const target = contracts.find(c => c.id === contractId);
+    const cleanNote = sanitizeText(
+      note || (resolution === 'release' ? 'Dispute resolved in favor of creator payout.' : 'Mutual escrow refund issued to brand dealer.'),
+      BLUEPRINT_LIMITS.NOTES_MAX
+    );
+    const nextStatus = resolution === 'release' ? 'APPROVED_PAYOUT_RELEASED' : 'REFUNDED_TO_DEALER';
+    const receiptHash = `ESCROW-INR-${Date.now().toString(16).toUpperCase()}`;
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    setLocalContracts(prev =>
+      prev.map(c =>
+        c.id !== contractId
+          ? c
+          : {
+              ...c,
+              escrowStatus: nextStatus,
+              resolutionNote: cleanNote,
+              escrowReceiptHash: receiptHash,
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_resolve`,
+                  action:
+                    resolution === 'release'
+                      ? 'Dispute Resolved: Payout Released'
+                      : 'Dispute Resolved: Escrow Refunded to Dealer',
+                  actor: 'CreatorBridge Escrow Vault',
+                  role: 'escrow_vault',
+                  timestamp: nowUtc,
+                  detail: cleanNote,
+                  txHash: receiptHash,
+                },
+              ],
+              milestones: c.milestones.map(m => ({
+                ...m,
+                status: resolution === 'release' ? 'Completed' : 'Refunded',
+                timestamp: todayStr,
+              })),
+              updatedAt: todayStr,
+            }
+      )
+    );
+
+    if (authUser && [...fsDealerContracts, ...fsCreatorContracts].some(c => c.id === contractId)) {
+      updateDoc(doc(db, 'contracts', contractId), {
+        escrowStatus: nextStatus,
+        resolutionNote: cleanNote,
+        escrowReceiptHash: receiptHash,
+        updatedAt: serverTimestamp(),
+      }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `contracts/${contractId}`));
+    }
+
+    if (target) {
+      notifyContractThread(
+        target.dealerId,
+        target.creatorId,
+        `Dispute settled (${receiptHash}): ${cleanNote}`
+      );
+    }
+  };
+
+  const approveAndReleaseEscrow = (contractId: string, confirmationNote?: string) => {
+    const target = contracts.find(c => c.id === contractId);
+    const receiptHash = `ESCROW-INR-${Date.now().toString(16).toUpperCase()}`;
+    const cleanNote = sanitizeText(
+      confirmationNote || 'All 3 verification gates confirmed by Business Dealer.',
+      BLUEPRINT_LIMITS.NOTES_MAX
+    );
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    const todayStr = new Date().toISOString().split('T')[0];
+
     setLocalContracts(prev =>
       prev.map(c =>
         c.id !== contractId
@@ -1222,12 +1739,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : {
               ...c,
               escrowStatus: 'APPROVED_PAYOUT_RELEASED',
+              resolutionNote: cleanNote,
+              escrowReceiptHash: receiptHash,
+              auditEvents: [
+                ...(c.auditEvents || []),
+                {
+                  id: `evt_${Date.now()}_release`,
+                  action: `Escrow Payout Released (₹${c.feeAmount.toLocaleString()} INR)`,
+                  actor: c.dealerName,
+                  role: 'escrow_vault',
+                  timestamp: nowUtc,
+                  detail: cleanNote,
+                  txHash: receiptHash,
+                },
+              ],
               milestones: c.milestones.map(m => ({
                 ...m,
                 status: 'Completed',
-                timestamp: new Date().toISOString().split('T')[0],
+                timestamp: todayStr,
               })),
-              updatedAt: new Date().toISOString().split('T')[0],
+              updatedAt: todayStr,
             }
       )
     );
@@ -1235,8 +1766,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (authUser && [...fsDealerContracts, ...fsCreatorContracts].some(c => c.id === contractId)) {
       updateDoc(doc(db, 'contracts', contractId), {
         escrowStatus: 'APPROVED_PAYOUT_RELEASED',
+        resolutionNote: cleanNote,
+        escrowReceiptHash: receiptHash,
         updatedAt: serverTimestamp(),
       }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `contracts/${contractId}`));
+    }
+
+    if (target) {
+      notifyContractThread(
+        target.dealerId,
+        target.creatorId,
+        `Escrow payout of ₹${target.feeAmount.toLocaleString()} INR released! Settlement Receipt: ${receiptHash}.`
+      );
     }
   };
 
@@ -1319,7 +1860,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         niche: creator.niche,
         subNiches: (creator.subNiches || []).slice(0, BLUEPRINT_LIMITS.LIST_MAX).map(s => sanitizeText(s, 60)),
         bio: sanitizeText(creator.bio, BLUEPRINT_LIMITS.DESCRIPTION_MAX, 'Creator'),
-        avatar: sanitizeText(creator.avatar, BLUEPRINT_LIMITS.AVATAR_MAX, '/src/assets/images/creator_avatar_tech_1794494846107.jpg'),
+        avatar: sanitizeText(creator.avatar, BLUEPRINT_LIMITS.AVATAR_MAX, '/assets/images/creators/tech.jpg'),
         subscribers: Math.max(0, Number(creator.subscribers) || 0),
         avgViews: Math.max(0, Number(creator.avgViews) || 0),
         engagementRate: Math.min(100, Math.max(0, Number(creator.engagementRate) || 0)),
@@ -1380,7 +1921,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ownerUid: authUser?.uid,
       name: audit.name,
       handle: audit.handle,
-      avatar: audit.avatar || '/src/assets/images/creator_avatar_tech_1794494846107.jpg',
+      avatar: audit.avatar || '/assets/images/creators/tech.jpg',
       channelUrl: audit.channelUrl,
       platform: 'YouTube',
       niche: audit.inferredNiche,
@@ -1439,7 +1980,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           niche: audit.inferredNiche,
           subNiches: ['Live YouTube API', countryName],
           bio: sanitizeText(audit.description, BLUEPRINT_LIMITS.DESCRIPTION_MAX, 'Audited YouTube Channel'),
-          avatar: sanitizeText(audit.avatar, BLUEPRINT_LIMITS.AVATAR_MAX, '/src/assets/images/creator_avatar_tech_1794494846107.jpg'),
+          avatar: sanitizeText(audit.avatar, BLUEPRINT_LIMITS.AVATAR_MAX, '/assets/images/creators/tech.jpg'),
           subscribers: Math.max(0, Number(audit.subscribers) || 0),
           avgViews: Math.max(0, Number(audit.avgViews) || 0),
           engagementRate: Math.min(100, Math.max(0, Number(audit.engagementRate) || 0)),
@@ -1462,7 +2003,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           niche: audit.inferredNiche,
           subNiches: ['Live YouTube API', countryName],
           bio: sanitizeText(audit.description, BLUEPRINT_LIMITS.DESCRIPTION_MAX, 'Audited YouTube Channel'),
-          avatar: sanitizeText(audit.avatar, BLUEPRINT_LIMITS.AVATAR_MAX, '/src/assets/images/creator_avatar_tech_1794494846107.jpg'),
+          avatar: sanitizeText(audit.avatar, BLUEPRINT_LIMITS.AVATAR_MAX, '/assets/images/creators/tech.jpg'),
           subscribers: Math.max(0, Number(audit.subscribers) || 0),
           avgViews: Math.max(0, Number(audit.avgViews) || 0),
           engagementRate: Math.min(100, Math.max(0, Number(audit.engagementRate) || 0)),
@@ -1526,7 +2067,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createContract,
         signContractAsDealer,
         signContractAsCreator,
+        verifyYouTubeProofUrl,
         submitDeliverableProof,
+        requestContractRevision,
+        raiseEscrowDispute,
+        resolveEscrowDispute,
         approveAndReleaseEscrow,
         initiateConnection,
         sendMessage,

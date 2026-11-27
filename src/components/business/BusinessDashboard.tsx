@@ -39,7 +39,12 @@ export const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
   const dealerContracts = contracts.filter(c => c.dealerId === currentDealer.id);
 
   const totalEscrowLocked = dealerContracts
-    .filter(c => c.escrowStatus === 'ESCROW_FUNDED_ACTIVE' || c.escrowStatus === 'DELIVERABLE_SUBMITTED')
+    .filter(c =>
+      c.escrowStatus === 'SIGNED_BY_DEALER_PENDING_CREATOR' ||
+      c.escrowStatus === 'ESCROW_FUNDED_ACTIVE' ||
+      c.escrowStatus === 'DELIVERABLE_SUBMITTED' ||
+      c.escrowStatus === 'DISPUTED'
+    )
     .reduce((sum, c) => sum + c.feeAmount, 0);
 
   const verifiedCreatorsCount = creators.filter(

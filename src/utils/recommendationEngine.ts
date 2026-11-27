@@ -100,7 +100,7 @@ export function calculateCreatorRecommendation(
   const youngAdultPct = (creator.demographics.ageDistribution.find(a => a.range === '25-34')?.percent || 0) +
                        (creator.demographics.ageDistribution.find(a => a.range === '18-24')?.percent || 0);
 
-  if (youngAdultPct >= 65 && topCountry.includes('United States')) {
+  if (youngAdultPct >= 65 && (topCountry.includes('India') || topCountry.includes('United States'))) {
     audienceScore = 15;
     audienceReason = `High-purchasing demographic concentration (${youngAdultPct}% aged 18-34) in target regions.`;
   } else if (youngAdultPct >= 50) {

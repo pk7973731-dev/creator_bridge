@@ -482,3 +482,300 @@ export async function fetchLiveYouTubeTrending(regionCode = 'IN') {
     };
   });
 }
+
+export interface DeliverableVerificationCheck {
+  key: 'video_exists' | 'privacy_status' | 'channel_match' | 'disclosure_check' | 'brand_keyword_match';
+  label: string;
+  passed: boolean;
+  severity: 'pass' | 'warning' | 'fail';
+  detail: string;
+}
+
+export interface DeliverableVerificationResult {
+  found: boolean;
+  videoId: string;
+  videoUrl: string;
+  title?: string;
+  channelId?: string;
+  channelTitle?: string;
+  channelHandle?: string;
+  publishedAt?: string;
+  durationFormatted?: string;
+  durationSeconds?: number;
+  privacyStatus?: string;
+  views?: number;
+  likes?: number;
+  comments?: number;
+  thumbnail?: string;
+  disclosureDetected: boolean;
+  matchedDisclosures: string[];
+  channelMatched: boolean | null;
+  matchedKeywords: string[];
+  verificationStatus: 'VERIFIED' | 'PARTIAL_WARNING' | 'FAILED';
+  summary: string;
+  checks: DeliverableVerificationCheck[];
+  verifiedAt: string;
+}
+
+export function extractYouTubeVideoId(input: string): string | null {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return null;
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+
+    if (host === 'youtu.be') {
+      const id = parsed.pathname.split('/').filter(Boolean)[0];
+      return id && /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+    }
+
+    if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+      const vParam = parsed.searchParams.get('v');
+      if (vParam && /^[a-zA-Z0-9_-]{11}$/.test(vParam)) return vParam;
+
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      if (segments.length >= 2 && ['shorts', 'embed', 'live', 'v'].includes(segments[0])) {
+        const id = segments[1];
+        return id && /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+      }
+    }
+  } catch {
+    // Fallback regex
+  }
+
+  const fallback = trimmed.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([a-zA-Z0-9_-]{11})/);
+  return fallback ? fallback[1] : null;
+}
+
+function parseIsoDuration(iso: string): { formatted: string; seconds: number } {
+  const match = (iso || '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return { formatted: '0:00', seconds: 0 };
+  const hours = Number(match[1] || 0);
+  const mins = Number(match[2] || 0);
+  const secs = Number(match[3] || 0);
+  const total = hours * 3600 + mins * 60 + secs;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const formatted = hours > 0 ? `${hours}:${pad(mins)}:${pad(secs)}` : `${mins}:${pad(secs)}`;
+  return { formatted, seconds: total };
+}
+
+export async function verifyYouTubeDeliverableVideo(params: {
+  url: string;
+  expectedCreatorHandle?: string;
+  expectedCreatorName?: string;
+  expectedKeywords?: string[];
+}): Promise<DeliverableVerificationResult> {
+  const videoId = extractYouTubeVideoId(params.url);
+  if (!videoId) {
+    const err = new Error('Invalid YouTube video URL or video ID. Provide a valid youtube.com/watch?v=..., youtu.be/..., or Shorts URL.') as Error & { status?: number };
+    err.status = 400;
+    throw err;
+  }
+
+  const verifiedAt = new Date().toISOString();
+  const vidRes = await ytFetch('videos', {
+    part: 'snippet,contentDetails,statistics,status',
+    id: videoId,
+  });
+
+  const item = vidRes.items?.[0];
+  if (!item) {
+    return {
+      found: false,
+      videoId,
+      videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      disclosureDetected: false,
+      matchedDisclosures: [],
+      channelMatched: false,
+      matchedKeywords: [],
+      verificationStatus: 'FAILED',
+      summary: `Video ${videoId} was not found or is Private/Deleted on YouTube.`,
+      checks: [
+        {
+          key: 'video_exists',
+          label: 'YouTube Video Availability',
+          passed: false,
+          severity: 'fail',
+          detail: 'No public or unlisted video metadata returned by YouTube Data API v3.',
+        },
+      ],
+      verifiedAt,
+    };
+  }
+
+  const snippet = item.snippet || {};
+  const status = item.status || {};
+  const stats = item.statistics || {};
+  const contentDetails = item.contentDetails || {};
+
+  const privacyStatus = String(status.privacyStatus || 'public').toLowerCase();
+  const privacyOk = privacyStatus === 'public' || privacyStatus === 'unlisted';
+
+  const duration = parseIsoDuration(contentDetails.duration || '');
+  const views = Number(stats.viewCount) || 0;
+  const likes = Number(stats.likeCount) || 0;
+  const comments = Number(stats.commentCount) || 0;
+
+  let channelHandle = '';
+  if (snippet.channelId) {
+    try {
+      const chRes = await ytFetch('channels', {
+        part: 'snippet',
+        id: snippet.channelId,
+      });
+      const chCustom = chRes.items?.[0]?.snippet?.customUrl;
+      if (chCustom) {
+        channelHandle = chCustom.startsWith('@') ? chCustom : `@${chCustom}`;
+      }
+    } catch {
+      // Non-fatal if channel handle lookup fails
+    }
+  }
+
+  // Channel ownership match check
+  let channelMatched: boolean | null = null;
+  let channelDetail = `Published by ${snippet.channelTitle || 'Unknown Channel'}${channelHandle ? ` (${channelHandle})` : ''}`;
+  if (params.expectedCreatorHandle || params.expectedCreatorName) {
+    const cleanExpectedHandle = (params.expectedCreatorHandle || '').replace(/^@/, '').toLowerCase().trim();
+    const cleanActualHandle = channelHandle.replace(/^@/, '').toLowerCase().trim();
+    const cleanExpectedName = (params.expectedCreatorName || '').toLowerCase().trim();
+    const cleanActualTitle = (snippet.channelTitle || '').toLowerCase().trim();
+
+    const handleMatches = Boolean(cleanExpectedHandle && cleanActualHandle && (
+      cleanActualHandle === cleanExpectedHandle ||
+      cleanActualHandle.includes(cleanExpectedHandle) ||
+      cleanExpectedHandle.includes(cleanActualHandle)
+    ));
+    const nameMatches = Boolean(
+      (cleanExpectedName && cleanActualTitle && (cleanActualTitle.includes(cleanExpectedName) || cleanExpectedName.includes(cleanActualTitle))) ||
+      (cleanExpectedHandle && cleanActualTitle.replace(/\s+/g, '').includes(cleanExpectedHandle.replace(/\s+/g, '')))
+    );
+
+    channelMatched = handleMatches || nameMatches;
+    channelDetail = channelMatched
+      ? `Confirmed channel match: ${snippet.channelTitle}${channelHandle ? ` (${channelHandle})` : ''}.`
+      : `Channel mismatch: video belongs to "${snippet.channelTitle}" (${channelHandle || 'no handle'}), expected ${params.expectedCreatorHandle || params.expectedCreatorName}.`;
+  }
+
+  // ASCI / FTC Sponsorship Disclosure check
+  const fullText = `${snippet.title || ''}\n${snippet.description || ''}\n${Array.isArray(snippet.tags) ? snippet.tags.join(' ') : ''}`;
+  const lowerText = fullText.toLowerCase();
+  const disclosurePatterns = [
+    '#ad',
+    '#sponsored',
+    '#paidpartnership',
+    '#paidpromotion',
+    '#collab',
+    'paid promotion',
+    'paid partnership',
+    'sponsored by',
+    'in partnership with',
+    'sponsored video',
+    'includes paid promotion',
+    'affiliate link',
+  ];
+  const matchedDisclosures = disclosurePatterns.filter(p => lowerText.includes(p));
+  const disclosureDetected = matchedDisclosures.length > 0;
+
+  // Brand / Campaign keyword match
+  const rawKeywords = (params.expectedKeywords || [])
+    .flatMap(k => k.split(/[\s,/|-]+/))
+    .map(w => w.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter(w => w.length >= 3 && !['the', 'and', 'for', 'with', 'video', 'youtube', 'launch', 'dedicated', 'integrated', 'sponsor', 'shorts', 'reels', 'package'].includes(w));
+  const uniqueKeywords = Array.from(new Set(rawKeywords)).slice(0, 12);
+  const matchedKeywords = uniqueKeywords.filter(kw => lowerText.includes(kw));
+
+  const checks: DeliverableVerificationCheck[] = [
+    {
+      key: 'video_exists',
+      label: 'Live YouTube Video Detected',
+      passed: true,
+      severity: 'pass',
+      detail: `"${snippet.title}" (${duration.formatted}) · ${views.toLocaleString()} views`,
+    },
+    {
+      key: 'privacy_status',
+      label: 'Deliverable Visibility Status',
+      passed: privacyOk,
+      severity: privacyOk ? 'pass' : 'fail',
+      detail: privacyOk
+        ? `Video is ${privacyStatus.toUpperCase()} and accessible for review.`
+        : `Video privacy is "${privacyStatus}". Must be Public or Unlisted.`,
+    },
+    {
+      key: 'channel_match',
+      label: 'Creator Channel Ownership',
+      passed: channelMatched !== false,
+      severity: channelMatched === false ? 'fail' : 'pass',
+      detail: channelDetail,
+    },
+    {
+      key: 'disclosure_check',
+      label: 'FTC / ASCI Sponsorship Disclosure (#ad)',
+      passed: disclosureDetected,
+      severity: disclosureDetected ? 'pass' : 'warning',
+      detail: disclosureDetected
+        ? `Disclosure detected in metadata: ${matchedDisclosures.slice(0, 3).join(', ')}`
+        : 'No #ad, #sponsored, or paid partnership tag found in video title/description.',
+    },
+    {
+      key: 'brand_keyword_match',
+      label: 'Campaign / Brand Keyword Mention',
+      passed: uniqueKeywords.length === 0 || matchedKeywords.length > 0,
+      severity: uniqueKeywords.length === 0 || matchedKeywords.length > 0 ? 'pass' : 'warning',
+      detail:
+        uniqueKeywords.length === 0
+          ? 'No campaign filter keywords provided.'
+          : matchedKeywords.length > 0
+          ? `Matched campaign keywords in description/title: ${matchedKeywords.join(', ')}`
+          : `None of the campaign keywords (${uniqueKeywords.slice(0, 4).join(', ')}) appeared in title or description.`,
+    },
+  ];
+
+  const hasHardFail = !privacyOk || channelMatched === false;
+  const hasWarning = !disclosureDetected || (uniqueKeywords.length > 0 && matchedKeywords.length === 0);
+
+  const verificationStatus: DeliverableVerificationResult['verificationStatus'] = hasHardFail
+    ? 'FAILED'
+    : hasWarning
+    ? 'PARTIAL_WARNING'
+    : 'VERIFIED';
+
+  const summary = hasHardFail
+    ? `Failed audit: ${!privacyOk ? 'Video is private.' : channelDetail}`
+    : hasWarning
+    ? `Video live (${views.toLocaleString()} views, ${duration.formatted}), but ${!disclosureDetected ? '#ad disclosure missing' : 'brand keywords not found in description'}.`
+    : `Verified live (${privacyStatus}, ${duration.formatted}, ${views.toLocaleString()} views) with ${matchedDisclosures[0] || '#ad'} disclosure & brand keywords.`;
+
+  return {
+    found: true,
+    videoId,
+    videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+    title: snippet.title || 'Untitled Video',
+    channelId: snippet.channelId || '',
+    channelTitle: snippet.channelTitle || '',
+    channelHandle,
+    publishedAt: snippet.publishedAt || '',
+    durationFormatted: duration.formatted,
+    durationSeconds: duration.seconds,
+    privacyStatus,
+    views,
+    likes,
+    comments,
+    thumbnail: snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || '',
+    disclosureDetected,
+    matchedDisclosures,
+    channelMatched,
+    matchedKeywords,
+    verificationStatus,
+    summary: summary.slice(0, 480),
+    checks,
+    verifiedAt,
+  };
+}
+

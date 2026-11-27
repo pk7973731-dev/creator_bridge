@@ -308,7 +308,7 @@ export const CreatorRecommendations: React.FC<CreatorRecommendationsProps> = ({
                   >
                     <div className="flex items-center gap-2.5">
                       <img
-                        src={ch.avatar || '/src/assets/images/creator_avatar_tech_1794494846107.jpg'}
+                        src={ch.avatar || '/assets/images/creators/tech.jpg'}
                         alt={ch.name}
                         referrerPolicy="no-referrer"
                         className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0"

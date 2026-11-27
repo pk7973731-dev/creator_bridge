@@ -96,12 +96,12 @@ export const PersonaModal: React.FC = () => {
         integrated60s: Number(creatorForm.rateIntegrated),
         shortsReels: Number(creatorForm.rateShorts),
       },
-      avatar: '/src/assets/images/creator_avatar_tech_1794494846107.jpg',
+      avatar: '/assets/images/creators/tech.jpg',
       demographics: {
         topCountries: [
-          { country: 'United States', percent: 55 },
-          { country: 'Canada', percent: 20 },
-          { country: 'UK', percent: 15 },
+          { country: 'India', percent: 78 },
+          { country: 'UAE', percent: 12 },
+          { country: 'Singapore', percent: 10 },
         ],
         ageDistribution: [
           { range: '18-24', percent: 35 },
@@ -378,7 +378,7 @@ export const PersonaModal: React.FC = () => {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Jordan River"
+                    placeholder="e.g. Riya Verma"
                     value={creatorForm.name}
                     onChange={e => setCreatorForm({ ...creatorForm, name: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -390,7 +390,7 @@ export const PersonaModal: React.FC = () => {
                   <input
                     type="text"
                     required
-                    placeholder="@jordancreates"
+                    placeholder="@riyacreates"
                     value={creatorForm.handle}
                     onChange={e => setCreatorForm({ ...creatorForm, handle: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none"

@@ -100,6 +100,39 @@ export interface ContractTerms {
   cancellationPolicy: string;
 }
 
+export interface DeliverableVerification {
+  status: 'UNVERIFIED' | 'VERIFIED' | 'PARTIAL_WARNING' | 'FAILED';
+  summary: string;
+  videoId?: string;
+  title?: string;
+  channelTitle?: string;
+  channelHandle?: string;
+  channelMatch?: boolean | null;
+  disclosureFound?: boolean;
+  privacyStatus?: string;
+  durationFormatted?: string;
+  views?: number;
+  likes?: number;
+  verifiedAt?: string;
+  checks?: {
+    key: string;
+    label: string;
+    passed: boolean;
+    severity: 'pass' | 'warning' | 'fail';
+    detail: string;
+  }[];
+}
+
+export interface EscrowAuditEvent {
+  id: string;
+  action: string;
+  actor: string;
+  role: UserRole | 'escrow_vault';
+  timestamp: string;
+  detail: string;
+  txHash?: string;
+}
+
 export interface DealContract {
   id: string;
   campaignId: string;
@@ -111,7 +144,15 @@ export interface DealContract {
   creatorHandle: string;
   deliverable: string;
   feeAmount: number;
-  escrowStatus: 'DRAFT' | 'SIGNED_BY_DEALER_PENDING_CREATOR' | 'ESCROW_FUNDED_ACTIVE' | 'DELIVERABLE_SUBMITTED' | 'APPROVED_PAYOUT_RELEASED' | 'DISPUTED';
+  platformFeePct?: number;
+  escrowStatus:
+    | 'DRAFT'
+    | 'SIGNED_BY_DEALER_PENDING_CREATOR'
+    | 'ESCROW_FUNDED_ACTIVE'
+    | 'DELIVERABLE_SUBMITTED'
+    | 'APPROVED_PAYOUT_RELEASED'
+    | 'DISPUTED'
+    | 'REFUNDED_TO_DEALER';
   terms: ContractTerms;
   dealerSignature?: {
     signed: boolean;
@@ -130,9 +171,20 @@ export interface DealContract {
     submittedAt: string;
     notes?: string;
   };
+  verification?: DeliverableVerification;
+  revisionsUsed?: number;
+  revisionFeedback?: string;
+  dispute?: {
+    reason: string;
+    raisedByRole: UserRole;
+    raisedAt: string;
+  };
+  resolutionNote?: string;
+  escrowReceiptHash?: string;
+  auditEvents?: EscrowAuditEvent[];
   milestones: {
     title: string;
-    status: 'Pending' | 'Completed' | 'In Review';
+    status: 'Pending' | 'Completed' | 'In Review' | 'Revision Requested' | 'Disputed' | 'Refunded';
     timestamp?: string;
   }[];
   createdAt: string;
