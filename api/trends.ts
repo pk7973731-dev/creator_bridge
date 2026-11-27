@@ -1,5 +1,5 @@
-import { getTrendingDatasetAnalytics } from './_lib/trendingDataset.ts';
-import { fetchLiveYouTubeTrending } from './_lib/youtube.ts';
+import { getTrendingDatasetAnalytics } from './_lib/trendingDataset.js';
+import { fetchLiveYouTubeTrending } from './_lib/youtube.js';
 
 export default async function handler(req: any, res: any) {
   try {

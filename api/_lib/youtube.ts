@@ -71,7 +71,7 @@ function getApiKey(): string {
   return key.trim();
 }
 
-async function ytFetch(endpoint: string, params: Record<string, string>) {
+async function ytFetch(endpoint: string, params: Record<string, string>): Promise<any> {
   const key = getApiKey();
   const url = new URL(`${YT_API_BASE}/${endpoint}`);
   for (const [k, v] of Object.entries(params)) {
@@ -80,7 +80,7 @@ async function ytFetch(endpoint: string, params: Record<string, string>) {
   url.searchParams.set('key', key);
 
   const response = await fetch(url.toString());
-  const data = await response.json();
+  const data = (await response.json()) as any;
 
   if (!response.ok) {
     const reason = data?.error?.errors?.[0]?.reason || 'api_error';

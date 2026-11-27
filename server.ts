@@ -2,11 +2,11 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import healthHandler from './api/health.ts';
-import trendsHandler from './api/trends.ts';
-import channelHandler from './api/youtube/channel.ts';
-import searchHandler from './api/youtube/search.ts';
-import verifyVideoHandler from './api/youtube/verify-video.ts';
+import healthHandler from './api/health.js';
+import trendsHandler from './api/trends.js';
+import channelHandler from './api/youtube/channel.js';
+import searchHandler from './api/youtube/search.js';
+import verifyVideoHandler from './api/youtube/verify-video.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -1,4 +1,4 @@
-import { loadKaggleTrendingVideos } from './_lib/trendingDataset.ts';
+import { loadKaggleTrendingVideos } from './_lib/trendingDataset.js';
 
 export default async function handler(_req: any, res: any) {
   try {

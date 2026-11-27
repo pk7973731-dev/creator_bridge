@@ -1,4 +1,4 @@
-import { INDIAN_YOUTUBE_TRENDING_DATA } from '../_data/indian_youtube_trending.ts';
+import { INDIAN_YOUTUBE_TRENDING_DATA } from '../_data/indian_youtube_trending.js';
 
 export interface KaggleTrendingVideo {
   video_id: string;

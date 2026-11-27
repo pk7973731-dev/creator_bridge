@@ -1,4 +1,4 @@
-import { verifyYouTubeDeliverableVideo } from '../_lib/youtube.ts';
+import { verifyYouTubeDeliverableVideo } from '../_lib/youtube.js';
 
 export default async function handler(req: any, res: any) {
   try {
